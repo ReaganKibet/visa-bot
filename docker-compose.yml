@@ -1,0 +1,84 @@
+version: '3.8'  # You can remove if warning bothers you
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://vfsuser:vfspass@db/vfsbot
+      - REDIS_URL=redis://redis:6379/0
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - GMAIL_CREDENTIALS_PATH=/app/creds/gmail.json
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_REGION=${AWS_REGION}
+      - VFS_TARGET_URL=${VFS_TARGET_URL}
+    volumes:
+      - ./creds:/app/creds
+    depends_on:
+      - db
+      - redis
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  worker:
+    build: .
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://vfsuser:vfspass@db/vfsbot
+      - REDIS_URL=redis://redis:6379/0
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - GMAIL_CREDENTIALS_PATH=/app/creds/gmail.json
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_REGION=${AWS_REGION}
+      - VFS_TARGET_URL=${VFS_TARGET_URL}
+    volumes:
+      - ./creds:/app/creds
+    depends_on:
+      - db
+      - redis
+    command: celery -A workers.tasks.celery_app worker -l INFO --concurrency=1
+
+  beat:
+    build: .
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    command: celery -A workers.tasks.celery_app beat -l INFO
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: vfsbot
+      POSTGRES_USER: vfsuser
+      POSTGRES_PASSWORD: vfspass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vfsuser -d vfsbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
